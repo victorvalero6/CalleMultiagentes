@@ -80,9 +80,11 @@ public class TimestepData
 [System.Serializable]
 public class TrafficLights
 {
-    public string S;
-    public string E;
-    public string W;
+    public string main_E;
+    public string main_W;
+    public string left;
+    public string right;
+    public string center;
 }
 
 // Game objects for visualization
@@ -288,32 +290,48 @@ void OnDisable()
 // New methods for traffic simulation
 void InitializeTrafficLights()
 {
-    // Create traffic light objects at intersection corners
+    // Create traffic light objects for complex intersection
+    // Based on the intersection diagram: Av. Ricardo Covarrubias (main), Blvd. Primavera (left/right), Independiente (center)
     if (trafficLightPrefab != null && intersectionCenter != null)
     {
         Vector3 center = intersectionCenter.position;
         
-        // Create traffic lights for each direction with more spacing
-        CreateTrafficLight("S", new Vector3(center.x + 8.5f, center.y, center.z - 9.5f));
-        CreateTrafficLight("E", new Vector3(center.x + 9.0f, center.y, center.z + 8.5f));
-        CreateTrafficLight("W", new Vector3(center.x - 9.0f, center.y, center.z - 8.5f));
+        // Traffic lights positioned at stop lines (matching the diagram)
+        // Main road (Av. Ricardo Covarrubias) - East-West axis
+        CreateTrafficLight("main_E", new Vector3(center.x + 3.0f, center.y, center.z)); // Stop lines 7,8,9 area
+        CreateTrafficLight("main_W", new Vector3(center.x - 3.0f, center.y, center.z)); // Stop lines 1,2 area
+        
+        // Left Blvd. Primavera - positioned at stop line 3 (coming from south)
+        CreateTrafficLight("left", new Vector3(center.x - 38.0f, center.y, center.z));
+        
+        // Right Blvd. Primavera - positioned at stop line 6 (coming from south)
+        CreateTrafficLight("right", new Vector3(center.x + 38.0f, center.y, center.z));
+        
+        // Center road (Independiente) - North-South axis
+        CreateTrafficLight("center", new Vector3(center.x, center.y, center.z + 3.0f)); // Stop line for Independiente
     }
 }
 
 void CreateTrafficLight(string direction, Vector3 position)
 {
-    // Set individual rotation for each direction
+    // Set individual rotation for each direction to face the intersection
     Quaternion rotation = Quaternion.identity;
     switch (direction)
     {
-        case "S": // South light - faces north
-            rotation = Quaternion.Euler(0, 180, 0); // No rotation
+        case "main_E": // East approach - faces west (toward intersection)
+            rotation = Quaternion.Euler(0, 270, 0);
             break;
-        case "E": // East light - faces west
-            rotation = Quaternion.Euler(0, 90, 0); // 90 degrees clockwise
+        case "main_W": // West approach - faces east (toward intersection)
+            rotation = Quaternion.Euler(0, 90, 0);
             break;
-        case "W": // West light - faces east
-            rotation = Quaternion.Euler(0, 270, 0); // 180 degrees
+        case "left": // Left branch approach - faces toward intersection center
+            rotation = Quaternion.Euler(0, 45, 0); // Diagonal toward center
+            break;
+        case "right": // Right branch approach - faces toward intersection center
+            rotation = Quaternion.Euler(0, 135, 0); // Diagonal toward center
+            break;
+        case "center": // North approach (Independiente) - faces south (toward intersection)
+            rotation = Quaternion.Euler(0, 180, 0);
             break;
     }
     

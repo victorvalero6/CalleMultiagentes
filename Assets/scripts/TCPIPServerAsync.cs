@@ -61,11 +61,13 @@ public class CarData
 {
     public string id;
     public string origin;
+    public string original_origin;
     public Vector2 position;
     public Vector2 direction;
     public string state;
     public string turn;
     public bool turned;
+    public string target_intersection;
     public int wait_time;
 }
 
@@ -82,9 +84,9 @@ public class TrafficLights
 {
     public string main_E;
     public string main_W;
-    public string left;
-    public string right;
-    public string center;
+    public string north_center;
+    public string south_left;
+    public string south_right;
 }
 
 // Game objects for visualization
@@ -103,7 +105,7 @@ private float playbackSpeed = 0.5f; // seconds per timestep (faster playback)
 // Smooth movement data
 private Dictionary<string, Vector3> targetPositions = new Dictionary<string, Vector3>();
 private Dictionary<string, Quaternion> targetRotations = new Dictionary<string, Quaternion>();
-private float interpolationSpeed = 5.0f; // How fast cars move between positions
+private float interpolationSpeed = 15.0f; // How fast cars move between positions (increased for large movements)
 
 void Start()
 {
@@ -226,10 +228,12 @@ void networkCode()
                 if (data.IndexOf("$") > -1)
                 {
                     // Check if this is traffic simulation data
-                    if (data.Contains("Traffic simulation data ready"))
+                    if (data.Contains("Traffic simulation data ready") || data.Contains("Three T-intersection simulation data ready"))
                     {
                         // Extract JSON data (everything between the acknowledgment and $)
-                        int jsonStart = data.IndexOf("Traffic simulation data ready") + "Traffic simulation data ready".Length;
+                        string searchString = data.Contains("Three T-intersection simulation data ready") ? 
+                            "Three T-intersection simulation data ready" : "Traffic simulation data ready";
+                        int jsonStart = data.IndexOf(searchString) + searchString.Length;
                         int jsonEnd = data.IndexOf("$");
                         if (jsonStart < jsonEnd)
                         {
@@ -290,25 +294,23 @@ void OnDisable()
 // New methods for traffic simulation
 void InitializeTrafficLights()
 {
-    // Create traffic light objects for complex intersection
-    // Based on the intersection diagram: Av. Ricardo Covarrubias (main), Blvd. Primavera (left/right), Independiente (center)
+    // Create traffic light objects for three T-intersections
+    // North center, South left, South right intersections
     if (trafficLightPrefab != null && intersectionCenter != null)
     {
         Vector3 center = intersectionCenter.position;
         
-        // Traffic lights positioned at stop lines (matching the diagram)
-        // Main road (Av. Ricardo Covarrubias) - East-West axis
-        CreateTrafficLight("main_E", new Vector3(center.x + 3.0f, center.y, center.z)); // Stop lines 7,8,9 area
-        CreateTrafficLight("main_W", new Vector3(center.x - 3.0f, center.y, center.z)); // Stop lines 1,2 area
+        // Traffic lights positioned at stop lines for the SOUTH_RIGHT intersection (50 units from center)
+        // All three lights belong to the south_right intersection
+        // Position lights at stop lines, not in the middle of the street
+        CreateTrafficLight("main_E", new Vector3(center.x + 58.0f, center.y, center.z - 5.0f)); // East stop line at south_right intersection
+        CreateTrafficLight("main_W", new Vector3(center.x + 42.0f, center.y, center.z + 5.0f)); // West stop line at south_right intersection
         
-        // Left Blvd. Primavera - positioned at stop line 3 (coming from south)
-        CreateTrafficLight("left", new Vector3(center.x - 38.0f, center.y, center.z));
+        // South right intersection - the only one with traffic lights
+        CreateTrafficLight("south_right", new Vector3(center.x + 45.0f, center.y, center.z - 5.0f)); // South stop line at south_right intersection
         
-        // Right Blvd. Primavera - positioned at stop line 6 (coming from south)
-        CreateTrafficLight("right", new Vector3(center.x + 38.0f, center.y, center.z));
-        
-        // Center road (Independiente) - North-South axis
-        CreateTrafficLight("center", new Vector3(center.x, center.y, center.z + 3.0f)); // Stop line for Independiente
+        // Note: north_center and south_left intersections don't have traffic lights
+        // They use incoming traffic detection instead
     }
 }
 
@@ -324,13 +326,7 @@ void CreateTrafficLight(string direction, Vector3 position)
         case "main_W": // West approach - faces east (toward intersection)
             rotation = Quaternion.Euler(0, 90, 0);
             break;
-        case "left": // Left branch approach - faces toward intersection center
-            rotation = Quaternion.Euler(0, 45, 0); // Diagonal toward center
-            break;
-        case "right": // Right branch approach - faces toward intersection center
-            rotation = Quaternion.Euler(0, 135, 0); // Diagonal toward center
-            break;
-        case "center": // North approach (Independiente) - faces south (toward intersection)
+        case "south_right": // South approach - faces north (toward intersection)
             rotation = Quaternion.Euler(0, 180, 0);
             break;
     }
@@ -372,6 +368,7 @@ void ProcessTrafficData(string jsonData)
         JArray timesteps = JArray.Parse(jsonData);
         movementData.Clear();
         
+        int totalCars = 0;
         foreach (JObject timestep in timesteps)
         {
             TimestepData stepData = new TimestepData();
@@ -393,6 +390,7 @@ void ProcessTrafficData(string jsonData)
                 CarData carData = new CarData();
                 carData.id = car["id"].ToString();
                 carData.origin = car["origin"].ToString();
+                carData.original_origin = car["original_origin"].ToString();
                 carData.position = new Vector2(
                     car["position"]["x"].Value<float>(),
                     car["position"]["y"].Value<float>()
@@ -404,15 +402,19 @@ void ProcessTrafficData(string jsonData)
                 carData.state = car["state"].ToString();
                 carData.turn = car["turn"].ToString();
                 carData.turned = car["turned"].Value<bool>();
+                carData.target_intersection = car["target_intersection"]?.ToString();
                 carData.wait_time = car["wait_time"].Value<int>();
                 
                 stepData.cars.Add(carData);
+                totalCars++;
             }
             
             movementData.Add(stepData);
         }
         
-        Debug.Log($"Loaded {movementData.Count} timesteps of traffic data");
+        Debug.Log($"Loaded {movementData.Count} timesteps of traffic data with {totalCars} total car instances");
+        Debug.Log($"Car prefab assigned: {(carPrefab != null ? "YES" : "NO")}");
+        Debug.Log($"Intersection center assigned: {(intersectionCenter != null ? "YES" : "NO")}");
         
         // Start playback
         currentTimestep = 0;
@@ -438,6 +440,8 @@ void PlayNextTimestep()
     
     TimestepData currentStep = movementData[currentTimestep];
     
+    Debug.Log($"Playing timestep {currentTimestep}: {currentStep.cars.Count} cars");
+    
     // Update traffic lights
     foreach (var light in currentStep.traffic_lights)
     {
@@ -452,6 +456,8 @@ void PlayNextTimestep()
 
 void UpdateCars(List<CarData> cars)
 {
+    Debug.Log($"UpdateCars called with {cars.Count} cars, activeCars count: {activeCars.Count}");
+    
     // Remove cars that are no longer in the simulation
     List<string> carsToRemove = new List<string>();
     foreach (var kvp in activeCars)
@@ -497,6 +503,8 @@ void UpdateCars(List<CarData> cars)
                 GameObject carObj = Instantiate(carPrefab, worldPos, Quaternion.identity);
                 carObj.name = $"Car_{carData.id}";
                 
+                Debug.Log($"Created new car: {carData.id} at position {worldPos}");
+                
                 // Set initial rotation
                 // Convert 2D direction to 3D rotation (Y in simulation = Z in Unity)
                 Vector3 direction3D = new Vector3(carData.direction.x, 0, carData.direction.y);
@@ -525,10 +533,23 @@ void SmoothCarMovements()
         
         if (targetPositions.ContainsKey(carId))
         {
-            // Smooth position interpolation
+            Vector3 currentPos = carObj.transform.position;
             Vector3 targetPos = targetPositions[carId];
-            carObj.transform.position = Vector3.Lerp(carObj.transform.position, targetPos, 
-                interpolationSpeed * Time.deltaTime);
+            float distance = Vector3.Distance(currentPos, targetPos);
+            
+            // If distance is very large (teleporting), snap to target immediately
+            if (distance > 100.0f)
+            {
+                carObj.transform.position = targetPos;
+                Debug.Log($"Car {carId} teleported from {currentPos} to {targetPos} (distance: {distance})");
+            }
+            else
+            {
+                // Smooth position interpolation with distance-based speed
+                float speed = Mathf.Max(interpolationSpeed, distance * 2.0f); // Faster for larger distances
+                carObj.transform.position = Vector3.Lerp(currentPos, targetPos, 
+                    speed * Time.deltaTime);
+            }
             
             // Smooth rotation interpolation
             if (targetRotations.ContainsKey(carId))
@@ -552,6 +573,8 @@ Vector3 ConvertToWorldPosition(Vector2 simPosition)
     {
         worldPos += intersectionCenter.position;
     }
+    
+    // Debug.Log($"ConvertToWorldPosition: sim({simPosition.x}, {simPosition.y}) -> world({worldPos.x}, {worldPos.y}, {worldPos.z})");
     
     return worldPos;
 }

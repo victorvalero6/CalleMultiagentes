@@ -3,25 +3,27 @@ import numpy as np
 import json
 import socket
 import time
+import matplotlib.pyplot as plt
+import pandas as pd
 
 # Parameters for three T-intersections: north center, south left, south right
 params = {
-    'steps': 300,          # duración en ticks (1 tick = 1 s) - reducido para animación
+    'steps': 600,          # duración en ticks (1 tick = 1 s) - AUMENTADO para timelapse
     'green_main': 25,      # VERDE para tráfico principal (carretera horizontal)
     'green_side': 15,      # VERDE para rama vertical (carretera vertical)
     'yellow': 3,           # ÁMBAR
     'all_red': 1,          # ALL-RED (despeje)
     
-    # Tasas Poisson de arribo (veh/s) por aproximación - reducidas para animación
-    'lambda_main_east': 0.06,   # Main road traffic (Este)
-    'lambda_main_west': 0.06,   # Main road traffic (Oeste)
-    'lambda_north_center': 0.04,  # Norte al centro
-    'lambda_south_left': 0.04,    # Sur izquierda
-    'lambda_south_right': 0.04,   # Sur derecha
+    # Tasas Poisson de arribo (veh/s) por aproximación - REDUCIDAS para menos tráfico
+    'lambda_main_east': 0.06,   # Main road traffic (Este) - MENOS TRÁFICO
+    'lambda_main_west': 0.06,   # Main road traffic (Oeste) - MENOS TRÁFICO
+    'lambda_north_center': 0.03,  # Norte al centro - MENOS TRÁFICO
+    'lambda_south_left': 0.03,    # Sur izquierda - MENOS TRÁFICO
+    'lambda_south_right': 0.03,   # Sur derecha - MENOS TRÁFICO
     
-    # Cinemática (ajustada para escala más grande)
-    'v_free': 30.0,        # m/s (REDUCIDO para movimiento más suave)
-    'headway': 8.0,       # m separación mínima (REDUCIDO para menos saltos) 
+    # Cinemática (ajustada para timelapse - PASOS MÁS CORTOS)
+    'v_free': 10.0,        # m/s (PASOS MÁS CORTOS para movimiento suave)
+    'headway': 5.0,       # m separación mínima (REDUCIDO para evitar que se peguen) 
     
     # Geometría para tres intersecciones en T (MUCHO MÁS GRANDE para Unity)
     'L_main': 120.0,       # Longitud carretera principal (horizontal) - REDUCIDO
@@ -341,9 +343,9 @@ class Car(ap.Agent):
             self.state = 'done'
             return
 
-        # Zona de decisión cerca de la stopline - distancia apropiada para escala grande
-        # Cars need larger stopping distance for the big intersection scale
-        near = self.dist_to(self.stopline) < 15.0  # Increased for large intersection scale
+        # Zona de decisión cerca de la stopline - distancia apropiada para pasos cortos
+        # Cars need smaller stopping distance for short steps
+        near = self.dist_to(self.stopline) < 8.0  # Reduced for short steps
 
         # Check if car should stop
         should_stop = False
@@ -366,14 +368,16 @@ class Car(ap.Agent):
         else:
             self.state = 'go'
 
-        # Espacio de seguridad con el líder en el mismo carril - standardized for all cars
+        # Espacio de seguridad con el líder en el mismo carril - improved to prevent sticking
         vmax = self.v
         head = self.model.headway_ahead(self)
         if head is not None:
             gap = np.linalg.norm(head.pos - self.pos)
-            # Standard headway for all cars - consistent behavior
-            if gap < self.model.p.headway * 1.5:  # Same multiplier for all cars
+            # Improved headway logic to prevent cars from getting stuck
+            if gap < self.model.p.headway * 0.8:  # Reduced multiplier to prevent excessive stopping
                 vmax = 0.0
+            elif gap < self.model.p.headway * 1.2:  # Gradual speed reduction
+                vmax = self.v * (gap - self.model.p.headway * 0.8) / (self.model.p.headway * 0.4)
 
         # --- Lógica de giro mejorada que respeta carriles para tres intersecciones en T ---
         if not self.turned and self.target_intersection is not None:
@@ -390,27 +394,27 @@ class Car(ap.Agent):
             
             center_dist = np.linalg.norm(self.pos - center_pos)
             
-            # Ajustar distancia de giro según el origen y destino
-            turn_distance = self.model.p.intersection_radius
+            # Ajustar distancia de giro según el origen y destino - improved to prevent glitches
+            turn_distance = self.model.p.intersection_radius * 0.8  # Slightly reduced base distance
             
             if self.origin in ['south_left', 'south_right']:
                 # Los autos del sur deben estar muy cerca de y=0 antes de girar
-                if abs(self.pos[1]) < 3.0:  # Muy cerca de la calle central
-                    turn_distance = 15.0  # Permitir giro desde más lejos
+                if abs(self.pos[1]) < 5.0:  # Muy cerca de la calle central
+                    turn_distance = 12.0  # Permitir giro desde más lejos
                 else:
-                    turn_distance = 2.0  # Muy cerca para otros casos
+                    turn_distance = 3.0  # Muy cerca para otros casos
             elif self.origin == 'main_W' and self.turn == 'R':
                 # West cars turning right to north - turn closer to intersection
-                turn_distance = 2.0  # Más cerca de la intersección
+                turn_distance = 3.0  # Más cerca de la intersección
             elif self.origin == 'north_center' and self.turn == 'L':
                 # North cars turning left to west - turn closer to intersection but not too close
-                turn_distance = 8.0  # Increased for large intersection scale
+                turn_distance = 6.0  # Reduced for smoother turns
             elif self.origin == 'north_center' and self.turn == 'R':
                 # North cars turning right to east - turn closer to intersection but not too close
-                turn_distance = 8.0  # Increased for large intersection scale
+                turn_distance = 6.0  # Reduced for smoother turns
             elif self.origin in ['main_E', 'main_W'] and self.turn in ['L', 'R']:
                 # Otros autos de main road que van a girar
-                turn_distance = 2.0  # Distancia moderada
+                turn_distance = 3.0  # Distancia moderada
             
             if center_dist < turn_distance:
                 # Perform the turn based on the turn type and intersection
@@ -508,45 +512,74 @@ class Car(ap.Agent):
                 # Cars that have turned from south should maintain their correct lanes
                 if self.turned and self.origin in ['south_left', 'south_right']:
                     if self.turn == 'L':  # Left turn from south - should be in right lane (top lane, y > 0)
-                        self.pos[1] = w/4
+                        # Gradual lane correction to prevent jumping
+                        target_y = w/4
+                        if abs(self.pos[1] - target_y) > 0.5:  # Only correct if significantly off
+                            self.pos[1] = target_y
                     elif self.turn == 'R':  # Right turn from south - should be in left lane (bottom lane, y < 0)
-                        self.pos[1] = -w/4
+                        # Gradual lane correction to prevent jumping
+                        target_y = -w/4
+                        if abs(self.pos[1] - target_y) > 0.5:  # Only correct if significantly off
+                            self.pos[1] = target_y
                 elif self.origin == 'main_E' and self.turn == 'S':
                     # Mantener en lado izquierdo del carril (va hacia oeste)
-                    self.pos[1] = w/4
+                    target_y = w/4
+                    if abs(self.pos[1] - target_y) > 0.5:
+                        self.pos[1] = target_y
                 elif self.origin == 'main_W' and self.turn == 'S':
                     # Mantener en lado derecho del carril (va hacia este)
-                    self.pos[1] = -w/4
+                    target_y = -w/4
+                    if abs(self.pos[1] - target_y) > 0.5:
+                        self.pos[1] = target_y
                 elif self.turn in ['L', 'R'] and not self.turned:
                     # Aún no ha llegado a la intersección, mantener en su lado
                     if self.origin == 'main_E':
-                        self.pos[1] = w/4  # Lado izquierdo (va hacia oeste)
+                        target_y = w/4  # Lado izquierdo (va hacia oeste)
+                        if abs(self.pos[1] - target_y) > 0.5:
+                            self.pos[1] = target_y
                     elif self.origin == 'main_W':
-                        self.pos[1] = -w/4  # Lado derecho (va hacia este)
+                        target_y = -w/4  # Lado derecho (va hacia este)
+                        if abs(self.pos[1] - target_y) > 0.5:
+                            self.pos[1] = target_y
             
             # Si el auto está en una calle vertical, debe mantenerse en su lado correcto
             elif self.origin == 'north_center':
                 # Norte SOLO usa carril izquierdo - el derecho es para tráfico del oeste
-                self.pos[0] = self.model.p.intersection_north_x - w/4
+                target_x = self.model.p.intersection_north_x - w/4
+                if abs(self.pos[0] - target_x) > 0.5:
+                    self.pos[0] = target_x
             elif self.origin == 'south_left':
                 # Check if this car came from west (should use left lane) or from south (should use right lane)
                 if hasattr(self, 'original_origin') and self.original_origin == 'main_W':
                     # West cars turning to south_left use left lane
-                    self.pos[0] = self.model.p.intersection_south_left_x - w/4
+                    target_x = self.model.p.intersection_south_left_x - w/4
+                    if abs(self.pos[0] - target_x) > 0.5:
+                        self.pos[0] = target_x
                 else:
                     # South cars use right lane
-                    self.pos[0] = self.model.p.intersection_south_left_x + w/4
+                    target_x = self.model.p.intersection_south_left_x + w/4
+                    if abs(self.pos[0] - target_x) > 0.5:
+                        self.pos[0] = target_x
             elif self.origin == 'south_right':
                 # Check if this car came from west (should use left lane) or from south (should use right lane)
                 if hasattr(self, 'original_origin') and self.original_origin == 'main_W':
                     # West cars turning to south_right use left lane
-                    self.pos[0] = self.model.p.intersection_south_right_x - w/4
+                    target_x = self.model.p.intersection_south_right_x - w/4
+                    if abs(self.pos[0] - target_x) > 0.5:
+                        self.pos[0] = target_x
                 else:
                     # South cars use right lane
-                    self.pos[0] = self.model.p.intersection_south_right_x + w/4
+                    target_x = self.model.p.intersection_south_right_x + w/4
+                    if abs(self.pos[0] - target_x) > 0.5:
+                        self.pos[0] = target_x
 
-        # Avanzar con pasos más pequeños para movimiento más suave
-        dt = 0.2  # Paso de tiempo más pequeño (0.2 segundos)
+        # Avanzar con movimiento suave y consistente
+        dt = 1.0  # Use consistent 1-second timestep to match simulation
+        # Ensure minimum movement to prevent sticking
+        min_speed = 0.5  # Minimum speed to prevent cars from getting completely stuck
+        if vmax < min_speed and vmax > 0:
+            vmax = min_speed
+        
         self.pos = self.pos + self.dir * vmax * dt
 
 class ThreeTIntersectionModel(ap.Model):
@@ -569,7 +602,7 @@ class ThreeTIntersectionModel(ap.Model):
         self.movement_data = []
 
     def headway_ahead(self, me):
-        """Líder en el mismo carril y sentido, si existe - handles both horizontal and vertical roads."""
+        """Líder en el mismo carril y sentido, si existe - improved to prevent sticking."""
         # Find cars in the same lane and direction
         same_lane_cars = []
         w = self.p.w
@@ -586,7 +619,8 @@ class ThreeTIntersectionModel(ap.Model):
                 else:  # Moving vertically (north/south streets)
                     lane_distance = abs(c.pos[0] - me.pos[0])  # X-coordinate difference
                 
-                if lane_distance < w/2:  # Within same lane
+                # More lenient lane detection to prevent false positives
+                if lane_distance < w * 0.7:  # Increased tolerance for lane detection
                     same_lane_cars.append(c)
         
         if not same_lane_cars:
@@ -597,7 +631,8 @@ class ThreeTIntersectionModel(ap.Model):
         for c in same_lane_cars:
             v = c.pos - me.pos
             proj = np.dot(v, me.dir)
-            if proj > 0:  # ahead
+            # Only consider cars that are significantly ahead to avoid micro-stopping
+            if proj > 2.0:  # Minimum distance ahead
                 ahead.append((proj, c))
         
         if not ahead:
@@ -766,7 +801,205 @@ def run_simulation_and_send_to_unity():
             f.write(json_data)
         print("Datos guardados en three_t_intersection_data.json")
 
+def run_comparison_analysis():
+    """Run simulations with both adaptive and fixed heuristics and generate comparison graphs"""
+    print("Running comparison analysis between adaptive and fixed heuristics...")
+    
+    # Parameters for comparison
+    base_params = params.copy()
+    
+    # Run adaptive simulation
+    print("Running adaptive heuristic simulation...")
+    adaptive_params = base_params.copy()
+    adaptive_params['policy'] = 'adaptive'
+    adaptive_model = ThreeTIntersectionModel(adaptive_params)
+    adaptive_model.run()
+    adaptive_data = adaptive_model.get_movement_json()
+    adaptive_stats = adaptive_model.get_summary_stats()
+    
+    # Run fixed simulation
+    print("Running fixed heuristic simulation...")
+    fixed_params = base_params.copy()
+    fixed_params['policy'] = 'fixed'
+    fixed_model = ThreeTIntersectionModel(fixed_params)
+    fixed_model.run()
+    fixed_data = fixed_model.get_movement_json()
+    fixed_stats = fixed_model.get_summary_stats()
+    
+    # Generate comparison graphs
+    generate_comparison_graphs(adaptive_data, fixed_data, adaptive_stats, fixed_stats)
+    
+    return adaptive_data, fixed_data, adaptive_stats, fixed_stats
+
+def generate_comparison_graphs(adaptive_data, fixed_data, adaptive_stats, fixed_stats):
+    """Generate line trend graphs comparing adaptive vs fixed heuristics"""
+    
+    # Parse data for analysis
+    adaptive_df = parse_simulation_data(adaptive_data)
+    fixed_df = parse_simulation_data(fixed_data)
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    fig.suptitle('Traffic Flow Analysis: Adaptive vs Fixed Heuristics', fontsize=16, fontweight='bold')
+    
+    # 1. Total Cars in System Over Time
+    ax1 = axes[0]
+    ax1.plot(adaptive_df['timestep'], adaptive_df['total_cars'], label='Adaptive', linewidth=2, color='blue')
+    ax1.plot(fixed_df['timestep'], fixed_df['total_cars'], label='Fixed', linewidth=2, color='red')
+    ax1.set_title('Total Cars in System Over Time')
+    ax1.set_xlabel('Time (seconds)')
+    ax1.set_ylabel('Number of Cars')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Performance Metrics Bar Comparison
+    ax2 = axes[1]
+    metrics = ['Throughput', 'Avg Wait Time']
+    adaptive_values = [adaptive_stats.get('total_cars_processed', 0), adaptive_stats.get('average_delay', 0)]
+    fixed_values = [fixed_stats.get('total_cars_processed', 0), fixed_stats.get('average_delay', 0)]
+    
+    x = np.arange(len(metrics))
+    width = 0.35
+    
+    bars1 = ax2.bar(x - width/2, adaptive_values, width, label='Adaptive', color='blue', alpha=0.7)
+    bars2 = ax2.bar(x + width/2, fixed_values, width, label='Fixed', color='red', alpha=0.7)
+    
+    # Add numbers on top of bars
+    for bar, value in zip(bars1, adaptive_values):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                f'{value:.1f}', ha='center', va='bottom', fontweight='bold')
+    
+    for bar, value in zip(bars2, fixed_values):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                f'{value:.1f}', ha='center', va='bottom', fontweight='bold')
+    
+    # Add percentage differences between bars
+    for i, (adaptive_val, fixed_val) in enumerate(zip(adaptive_values, fixed_values)):
+        if fixed_val > 0:  # Avoid division by zero
+            if i == 0:  # Throughput - higher is better
+                diff_pct = ((adaptive_val - fixed_val) / fixed_val) * 100
+                diff_text = f"{diff_pct:+.1f}%"
+            else:  # Wait time - lower is better
+                diff_pct = ((fixed_val - adaptive_val) / fixed_val) * 100
+                diff_text = f"{diff_pct:+.1f}%"
+            
+            # Position the percentage text above both bars
+            max_height = max(adaptive_val, fixed_val)
+            ax2.text(x[i], max_height + 0.5, diff_text, 
+                    ha='center', va='bottom', fontweight='bold', 
+                    fontsize=10, color='green' if diff_pct > 0 else 'red')
+    
+    ax2.set_title('Performance Metrics Comparison')
+    ax2.set_xlabel('Metrics')
+    ax2.set_ylabel('Values')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(metrics)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('traffic_heuristics_comparison.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    # Generate detailed analysis report
+    generate_analysis_report(adaptive_stats, fixed_stats)
+
+def parse_simulation_data(json_data):
+    """Parse simulation JSON data into DataFrame for analysis"""
+    data = json.loads(json_data)
+    
+    timesteps = []
+    total_cars = []
+    queue_data = {direction: [] for direction in ['main_E', 'main_W', 'north_center', 'south_left', 'south_right']}
+    
+    for timestep in data:
+        timesteps.append(timestep['timestep'])
+        total_cars.append(len(timestep['cars']))
+        
+        # Count cars by direction (approximate queue lengths)
+        for direction in queue_data.keys():
+            count = sum(1 for car in timestep['cars'] if car.get('origin') == direction)
+            queue_data[direction].append(count)
+    
+    df = pd.DataFrame({
+        'timestep': timesteps,
+        'total_cars': total_cars,
+        **queue_data
+    })
+    
+    return df
+
+def count_light_changes(json_data):
+    """Count traffic light state changes over time"""
+    data = json.loads(json_data)
+    changes = []
+    prev_states = None
+    
+    for timestep in data:
+        current_states = timestep['traffic_lights']
+        if prev_states is not None:
+            change_count = sum(1 for light in current_states 
+                             if current_states[light] != prev_states.get(light, 'G'))
+            changes.append(change_count)
+        else:
+            changes.append(0)
+        prev_states = current_states
+    
+    return changes
+
+def generate_analysis_report(adaptive_stats, fixed_stats):
+    """Generate a detailed analysis report comparing both heuristics"""
+    
+    report = f"""
+# Traffic Heuristics Analysis Report
+
+## Summary Statistics
+
+### Adaptive Heuristics
+- Total Throughput: {adaptive_stats.get('total_cars_processed', 0):.2f} cars
+- Average Wait Time: {adaptive_stats.get('average_delay', 0):.2f} seconds
+- Maximum Queue Length: {adaptive_stats.get('max_queues', 0):.2f} cars
+- Total Simulation Time: {adaptive_stats.get('total_timesteps', 0):.2f} seconds
+
+### Fixed Heuristics
+- Total Throughput: {fixed_stats.get('total_cars_processed', 0):.2f} cars
+- Average Wait Time: {fixed_stats.get('average_delay', 0):.2f} seconds
+- Maximum Queue Length: {fixed_stats.get('max_queues', 0):.2f} cars
+- Total Simulation Time: {fixed_stats.get('total_timesteps', 0):.2f} seconds
+
+## Performance Comparison
+
+### Throughput Improvement
+- Adaptive vs Fixed: {((adaptive_stats.get('total_cars_processed', 0) - fixed_stats.get('total_cars_processed', 0)) / max(fixed_stats.get('total_cars_processed', 1), 1) * 100):.1f}%
+
+### Wait Time Reduction
+- Adaptive vs Fixed: {((fixed_stats.get('average_delay', 0) - adaptive_stats.get('average_delay', 0)) / max(fixed_stats.get('average_delay', 1), 1) * 100):.1f}%
+
+### Queue Length Reduction
+- Adaptive vs Fixed: {((fixed_stats.get('max_queues', 0) - adaptive_stats.get('max_queues', 0)) / max(fixed_stats.get('max_queues', 1), 1) * 100):.1f}%
+
+## Conclusions
+
+The adaptive heuristic {'outperforms' if adaptive_stats.get('total_cars_processed', 0) > fixed_stats.get('total_cars_processed', 0) else 'underperforms'} the fixed heuristic in terms of throughput.
+
+Wait times are {'reduced' if adaptive_stats.get('average_delay', 0) < fixed_stats.get('average_delay', 0) else 'increased'} with the adaptive approach.
+
+Queue lengths are {'reduced' if adaptive_stats.get('max_queues', 0) < fixed_stats.get('max_queues', 0) else 'increased'} with the adaptive approach.
+"""
+    
+    # Save report to file
+    with open('traffic_analysis_report.md', 'w') as f:
+        f.write(report)
+    
+    print("Analysis report saved to 'traffic_analysis_report.md'")
+    print(report)
+
 if __name__ == "__main__":
+    # Run comparison analysis
+    run_comparison_analysis()
+    
     # Run simulation and export to JSON files
     run_simulation_and_export_json()
     

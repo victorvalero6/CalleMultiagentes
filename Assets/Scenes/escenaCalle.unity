@@ -8952,7 +8952,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9af89de3b47c84408b2a9ef135dc6352, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  carPrefab: {fileID: 4300018382245563080, guid: c808c307719ff47f583a6c72e075666d, type: 3}
+  carPrefabs:
+  - {fileID: 3427427058005147119, guid: e7d05e2bd5c1f47aebc01ff76ec43eb5, type: 3}
+  - {fileID: 4300018382245563080, guid: c808c307719ff47f583a6c72e075666d, type: 3}
+  - {fileID: 9119934654444950607, guid: e1fefd7248c0c4679a30238e813cbcc5, type: 3}
+  - {fileID: 4474280366912833078, guid: c6b90b6f2a9ec4eba88c5797666e5319, type: 3}
   trafficLightPrefab: {fileID: 2022727881}
   intersectionCenter: {fileID: 1261851670}
 --- !u!4 &1639096995

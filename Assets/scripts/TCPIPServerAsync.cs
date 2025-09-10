@@ -90,7 +90,7 @@ public class TrafficLights
 }
 
 // Game objects for visualization
-public GameObject carPrefab; // Assign a car prefab in the inspector
+public GameObject[] carPrefabs; // Assign multiple car prefabs in the inspector for randomization
 public GameObject trafficLightPrefab; // Assign traffic light prefab in inspector
 public Transform intersectionCenter; // Center point of intersection
 
@@ -100,7 +100,7 @@ private Dictionary<string, GameObject> activeCars = new Dictionary<string, GameO
 private Dictionary<string, GameObject> trafficLights = new Dictionary<string, GameObject>();
 private int currentTimestep = 0;
 private bool isPlaying = false;
-private float playbackSpeed = 0.5f; // seconds per timestep (faster playback)
+private float playbackSpeed = 0.1f; // seconds per timestep (MUCH faster for timelapse effect)
 
 // Smooth movement data
 private Dictionary<string, Vector3> targetPositions = new Dictionary<string, Vector3>();
@@ -413,8 +413,6 @@ void ProcessTrafficData(string jsonData)
         }
         
         Debug.Log($"Loaded {movementData.Count} timesteps of traffic data with {totalCars} total car instances");
-        Debug.Log($"Car prefab assigned: {(carPrefab != null ? "YES" : "NO")}");
-        Debug.Log($"Intersection center assigned: {(intersectionCenter != null ? "YES" : "NO")}");
         
         // Start playback
         currentTimestep = 0;
@@ -440,7 +438,6 @@ void PlayNextTimestep()
     
     TimestepData currentStep = movementData[currentTimestep];
     
-    Debug.Log($"Playing timestep {currentTimestep}: {currentStep.cars.Count} cars");
     
     // Update traffic lights
     foreach (var light in currentStep.traffic_lights)
@@ -456,7 +453,6 @@ void PlayNextTimestep()
 
 void UpdateCars(List<CarData> cars)
 {
-    Debug.Log($"UpdateCars called with {cars.Count} cars, activeCars count: {activeCars.Count}");
     
     // Remove cars that are no longer in the simulation
     List<string> carsToRemove = new List<string>();
@@ -496,14 +492,14 @@ void UpdateCars(List<CarData> cars)
         }
         else
         {
-            // Create new car
-            if (carPrefab != null)
+            // Create new car with random prefab
+            GameObject selectedPrefab = GetRandomCarPrefab();
+            if (selectedPrefab != null)
             {
                 Vector3 worldPos = ConvertToWorldPosition(carData.position);
-                GameObject carObj = Instantiate(carPrefab, worldPos, Quaternion.identity);
+                GameObject carObj = Instantiate(selectedPrefab, worldPos, Quaternion.identity);
                 carObj.name = $"Car_{carData.id}";
                 
-                Debug.Log($"Created new car: {carData.id} at position {worldPos}");
                 
                 // Set initial rotation
                 // Convert 2D direction to 3D rotation (Y in simulation = Z in Unity)
@@ -541,7 +537,6 @@ void SmoothCarMovements()
             if (distance > 100.0f)
             {
                 carObj.transform.position = targetPos;
-                Debug.Log($"Car {carId} teleported from {currentPos} to {targetPos} (distance: {distance})");
             }
             else
             {
@@ -577,6 +572,24 @@ Vector3 ConvertToWorldPosition(Vector2 simPosition)
     // Debug.Log($"ConvertToWorldPosition: sim({simPosition.x}, {simPosition.y}) -> world({worldPos.x}, {worldPos.y}, {worldPos.z})");
     
     return worldPos;
+}
+
+GameObject GetRandomCarPrefab()
+{
+    // If we have multiple car prefabs, randomly select one
+    if (carPrefabs != null && carPrefabs.Length > 0)
+    {
+        int randomIndex = UnityEngine.Random.Range(0, carPrefabs.Length);
+        GameObject selectedPrefab = carPrefabs[randomIndex];
+        if (selectedPrefab != null)
+        {
+            return selectedPrefab;
+        }
+    }
+    
+    // If no prefabs are assigned, log error
+    Debug.LogError("No car prefabs assigned! Please assign car prefabs in the carPrefabs array in the inspector.");
+    return null;
 }
 
 // Public methods for external control

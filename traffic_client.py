@@ -47,7 +47,7 @@ if __name__ == "__main__":
     print("2. Enviando datos desde complex_intersection_data.json...")
     
     # Enviar datos desde el archivo JSON generado
-    success = load_and_send_from_file('complex_intersection_data.json')
+    success = load_and_send_from_file('three_t_intersection_data.json')
     
     if success:
         print("✅ ¡Datos enviados exitosamente a Unity!")
